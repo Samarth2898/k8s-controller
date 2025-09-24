@@ -1,5 +1,5 @@
 /*
-Copyright 2025.
+Copyright 2022.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,16 +20,18 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/slack-go/slack"
+	"github.com/nlopes/slack"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	corev1 "k8s.io/api/core/v1"
 	crdv1 "sam.text/controller/api/v1"
 )
 
@@ -39,9 +41,9 @@ type PodTrackerReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=crd.sam.test,resources=podtrackers,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=crd.sam.test,resources=podtrackers/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=crd.sam.test,resources=podtrackers/finalizers,verbs=update
+//+kubebuilder:rbac:groups=crd.devops.toolbox,resources=podtrackers,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=crd.devops.toolbox,resources=podtrackers/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=crd.devops.toolbox,resources=podtrackers/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -51,9 +53,16 @@ type PodTrackerReconciler struct {
 // the user.
 //
 // For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
+// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.12.2/pkg/reconcile
 func (r *PodTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx)
+	logger := log.FromContext(ctx)
+
+	// var podTracker crdv1.PodTracker
+	// if err := r.Get(ctx, req.NamespacedName, &podTracker); err != nil {
+	// 	logger.Error(err, "unable to fetch pod tracker")
+	// 	return ctrl.Result{}, client.IgnoreNotFound(err)
+	// }
+	// logger.V(1).Info("Found tracker", "name", podTracker.Spec.Name)
 
 	var podTrackerList crdv1.PodTrackerList
 
@@ -78,7 +87,7 @@ func (r *PodTrackerReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 func report(reporter crdv1.PodTracker, pod corev1.Pod) {
 	// report to slack
-	logf.Log.V(1).Info("Reporting to reporter", "name", reporter.Spec.Name, "endpoint", reporter.Spec.Report.Key)
+	log.Log.V(1).Info("Reporting to reporter", "name", reporter.Spec.Name, "endpoint", reporter.Spec.Report.Key)
 	slackChannel := reporter.Spec.Report.Channel
 	app := slack.New(reporter.Spec.Report.Key, slack.OptionDebug(true))
 
@@ -89,15 +98,15 @@ func report(reporter crdv1.PodTracker, pod corev1.Pod) {
 		msgSection,
 	)
 	fmt.Print(msg)
-	logf.Log.V(1).Info("Reporting", "message", "", "channel", slackChannel)
+	log.Log.V(1).Info("Reporting", "message", "", "channel", slackChannel)
 	_, _, _, err := app.SendMessage(slackChannel, msg)
 
 	if err != nil {
-		logf.Log.V(1).Info(err.Error())
+		log.Log.V(1).Info(err.Error())
 	}
 }
-func (r *PodTrackerReconciler) HandlePodEvents(pod client.Object) []reconcile.Request {
-	// TODO(user): your logic here
+
+func (r *PodTrackerReconciler) HandlePodEvents(ctx context.Context, pod client.Object) []reconcile.Request {
 	if pod.GetNamespace() != "default" {
 		return []reconcile.Request{}
 	}
@@ -108,38 +117,40 @@ func (r *PodTrackerReconciler) HandlePodEvents(pod client.Object) []reconcile.Re
 	}
 
 	var podObject corev1.Pod
-	err := r.Get(context.Background(), namesapcedName, &podObject)
+	err := r.Get(ctx, namesapcedName, &podObject)
 
 	if err != nil {
 		return []reconcile.Request{}
 	}
 
 	if len(podObject.Annotations) == 0 {
-		logf.Log.V(1).Info("No annotations set, so this pod is becoming a tracked one now", "pod", podObject.Name)
-	} else if podObject.GetAnnotations()["exampleAnnotation"] == "crd.devops.toolbox" {
-		logf.Log.V(1).Info("Found a managed pod, lets report it", "pod", podObject.Name)
+		log.Log.V(1).Info("No annotations set, so this pod is becoming a tracked one now", "pod", podObject.Name)
+	} else if podObject.GetAnnotations()["exampleAnnotation"] == "crd.sam.test" {
+		log.Log.V(1).Info("Found a managed pod, lets report it", "pod", podObject.Name)
 	} else {
 		return []reconcile.Request{}
 	}
 
 	podObject.SetAnnotations(map[string]string{
-		"exampleAnnotation": "crd.devops.toolbox",
+		"exampleAnnotation": "crd.sam.test",
 	})
 
-	if err := r.Update(context.TODO(), &podObject); err != nil {
-		logf.Log.V(1).Info("error trying to update pod", "err", err)
+	if err := r.Update(ctx, &podObject); err != nil {
+		log.Log.V(1).Info("error trying to update pod", "err", err)
 	}
-	requests := []reconcile.Request{
+	return []reconcile.Request{
 		{NamespacedName: namesapcedName},
 	}
-	return requests
-	// return []reconcile.Request{}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PodTrackerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&crdv1.PodTracker{}).
-		Named("podtracker").
+		Watches(
+			&corev1.Pod{},
+			handler.EnqueueRequestsFromMapFunc(r.HandlePodEvents),
+			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}),
+		).
 		Complete(r)
 }

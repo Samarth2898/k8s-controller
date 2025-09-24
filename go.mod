@@ -3,9 +3,9 @@ module sam.text/controller
 go 1.24.5
 
 require (
+	github.com/nlopes/slack v0.6.0
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.1
-	github.com/slack-go/slack v0.17.3
 	k8s.io/api v0.33.0
 	k8s.io/apimachinery v0.33.0
 	k8s.io/client-go v0.33.0
